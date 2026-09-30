@@ -352,6 +352,36 @@ class TMgisCatalogBookServiceImplTest {
     }
 
     @Test
+    void 册子头汇总数与行目拆项账对不上即顶回() {
+        CatalogAcceptResult r = service.accept(book("ML-301", "临川市",
+                line(1, "A1", "地形图", "临川", "10"),
+                line(2, "A2", "影像图", "临川", "20")));
+        // 有人事后改了册子头的汇总数（行目没动）：翻账、重递都得当场顶回
+        TMgisCatalogBook head = books.get(0);
+        assertEquals(r.getBookId(), head.getId());
+        head.setSheetTotal(99);
+        CatalogAcceptException e = assertThrows(CatalogAcceptException.class,
+                () -> service.viewByBookNo("ML-301"));
+        assertTrue(e.getMessage().contains("两本账对不上"));
+        assertThrows(CatalogAcceptException.class,
+                () -> service.accept(book("ML-301", "临川市", line(1, "A1", "地形图", "临川", "1"))));
+        // 属地批量翻账碰到坏册整批摆不出来，不能把糊涂账推给窗口
+        assertThrows(CatalogAcceptException.class, () -> service.viewsByRegion("临川市"));
+    }
+
+    @Test
+    void 行目被人摘了一行册子头没改一样顶回() {
+        service.accept(book("ML-302", "临川市",
+                line(1, "A1", "地形图", "临川", "10"),
+                line(2, "A2", "影像图", "临川", "20")));
+        // 行目少了一行，册子头总行数仍是 2
+        lines.remove(0);
+        CatalogAcceptException e = assertThrows(CatalogAcceptException.class,
+                () -> service.viewByBookNo("ML-302"));
+        assertTrue(e.getMessage().contains("两本账对不上"));
+    }
+
+    @Test
     void 凭册号翻账册号不在账上顶回() {
         CatalogAcceptException e = assertThrows(CatalogAcceptException.class,
                 () -> service.viewByBookNo("ML-NOPE"));

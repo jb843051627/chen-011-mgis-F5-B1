@@ -29,7 +29,8 @@
 | 一家单位一册图对一条清单 | 清单与核准件 1:1（唯一键兜底）；一幅图一行，清单行数与核准件图幅行数恒等，两边对不上即库里被人动过 | `t_mgis_use_claim`、`UseOrderTally` |
 | 从末阶一级级捋得回去 | 每笔记前一笔哈希（头一笔认 64 个 0），哈希押进阶、动作、写的话、经办、时辰、轮次；顺拉自受理念到放成果逐笔重算，倒拉自末笔沿前哈希念回受理，步数须与总笔数相合 | `UseOrderChainJudge.verifyForward/verifyBackward` |
 | 捋出来的与当日屏上同一个模样、同一序 | 逐阶页面只显最新一轮算数的笔，按落笔先后排；表式就用申请单那四阶（受理/核验/省厅/放成果），不另起炉灶 | `UseOrderFlow.pageOf`、`UseOrderPageView` |
-| 旧签名照封，扩本事添重载 | 早年 `t_mgis_use_bill` 脚手架（approve/reject/rollback）原样封存不动；新流程走全新五表，旧方法签名一个不改 | `ITMgisUseBillService`（封存）、`sql/mgis_use_order.sql` |
+| 旧签名照封，扩本事添重载 | 早年 `t_mgis_use_bill` 脚手架三法签名一个不改（`ITMgisUseBillService`）；但三法内里按本章规矩填平：签批/打回/退回每笔落新票籍表 `t_mgis_use_bill_sign`（哪位签过查得到）、联名档（sign_mode=1）须不同的人签满 need_count 才放行、打回即置「已打回」定死、退回把旧票 active 销档另起一趟重签、同件并发行锁串行。新意思走新重载（带经办人的 `rollback(id,operator,comment)`、`listSigns`、`requireConsistent`） | `ITMgisUseBillService`、`LegacyUseBillJudge`、`sql/mgis_use_bill_sign.sql` |
+| 库里历年旧单，新判定接得住 | 旧单只开只读回看门 `GET /mgisUseBill/{id}`：折成新四阶口径（头层→市局核验、末层→省厅核准、核讫→窗口放成果），状态与新流程同码同义（0在办/1已核准/2已否决）；零票籍的历年老单放行回看，单据签数与票籍一旦都有就须当场对得齐 | `LegacyUseBillJudge.newStageOf`、`MgisUseBillController`、`LegacyBillView` |
 
 ## 门脸规矩
 
@@ -114,8 +115,11 @@
 | `GET  /mgisUseOrder/{id}` | 申请单页面：四阶表式，只开眼下阶的口子，每阶只显最新一轮 |
 | `GET  /mgisUseOrder/{id}/chain` | 落笔链校验：顺拉倒拉，两程皆通才算合格 |
 | `GET  /mgisUseOrder/{id}/claim` | 领用清单回看（图幅代号、密级、出图年份、批准文号） |
+| `GET  /mgisUseBill/{id}` | 旧「逐级核准单」按新四阶口径只读回看（兼容门；票籍、状态一并回） |
 
 无 add/edit/remove 端点；改栏、撤件一律另起新申请。
 
 建表脚本：`sql/mgis_use_order.sql`（申请单、申请图幅行、签署落笔链、
-领用清单、清单行五表）。早年脚手架 `t_mgis_use_bill` 与本流程无涉，原样封存。
+领用清单、清单行五表）。早年脚手架 `t_mgis_use_bill` 表结构原样不动，
+其签批/打回/退回另落新票籍表 `sql/mgis_use_bill_sign.sql`（只立不删、
+打回销档），三法签名不变、内里按本章规矩填平。

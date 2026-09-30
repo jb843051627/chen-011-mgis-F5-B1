@@ -1,6 +1,7 @@
 package com.fc.v2.useorder;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fc.v2.common.useorder.UseOrderAction;
 import com.fc.v2.common.useorder.UseOrderChainJudge;
 import com.fc.v2.common.useorder.UseOrderFlow;
@@ -107,7 +108,46 @@ class TMgisUseOrderServiceImplTest {
             orders.add(inv.getArgument(0));
             return 1;
         });
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        // 条件更新照真库的 WHERE 匹配：id/stage/round_no/status 四样对得上才动一行。
+        // 恒回 1 的假库会把「放成果时件已核准、条件却只认在办」这种真库必回滚的
+        // 毛病瞒过去，所以这里按 UpdateWrapper 上的比相条件当场对。
+        when(orderMapper.update(isNull(), any())).thenAnswer(inv -> {
+            UpdateWrapper<TMgisUseOrder> uw = inv.getArgument(1);
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(?i)(id|stage|round_no|status)\\s*=\\s*#\\{ew\\.paramNameValuePairs\\.(\\w+)}")
+                    .matcher(uw.getSqlSegment());
+            Long whereId = null;
+            String whereStage = null;
+            Integer whereRound = null;
+            Integer whereStatus = null;
+            while (m.find()) {
+                Object v = uw.getParamNameValuePairs().get(m.group(2));
+                switch (m.group(1).toLowerCase()) {
+                    case "id":
+                        whereId = ((Number) v).longValue();
+                        break;
+                    case "stage":
+                        whereStage = String.valueOf(v);
+                        break;
+                    case "round_no":
+                        whereRound = ((Number) v).intValue();
+                        break;
+                    default:
+                        whereStatus = ((Number) v).intValue();
+                        break;
+                }
+            }
+            for (TMgisUseOrder o : orders) {
+                if (!o.getId().equals(whereId)) {
+                    continue;
+                }
+                boolean hit = (whereStage == null || whereStage.equals(o.getStage()))
+                        && (whereRound == null || whereRound.equals(o.getRoundNo()))
+                        && (whereStatus == null || whereStatus.equals(o.getStatus()));
+                return hit ? 1 : 0;
+            }
+            return 0;
+        });
 
         when(entryMapper.selectList(any())).thenAnswer(inv -> {
             QueryWrapper<?> qw = inv.getArgument(0);
@@ -475,6 +515,40 @@ class TMgisUseOrderServiceImplTest {
     }
 
     // ---------- 页面、链、清单回看 ----------
+
+    @Test
+    void 核准后页面只留放成果阶的口子() {
+        TMgisUseOrder order = acceptOne();
+        Long id = order.getId();
+        cityPass(id, "市局吴");
+        service.sign(opinion(id, UseOrderAction.SIGN_SECRECY, "到位"), "省厅王");
+        service.sign(opinion(id, UseOrderAction.SIGN_PURPOSE, "正当"), "省厅郑");
+        // 两签齐：件已核准、停在放成果阶，这一阶的口子得开着，窗口才点得出放成果
+        UseOrderPageView view = service.pageView(id);
+        assertEquals(UseOrderStage.ISSUE.name(), view.getCurrentStage());
+        int open = 0;
+        for (UseOrderPageView.StagePage sp : view.getStages()) {
+            if (sp.isOpen()) {
+                open++;
+                assertEquals(UseOrderStage.ISSUE.name(), sp.getStage());
+            }
+        }
+        assertEquals(1, open);
+    }
+
+    @Test
+    void 放成果这一下在真库条件更新下挪得到办结() {
+        TMgisUseOrder order = acceptOne();
+        Long id = order.getId();
+        cityPass(id, "市局吴");
+        service.sign(opinion(id, UseOrderAction.SIGN_SECRECY, "到位"), "省厅王");
+        service.sign(opinion(id, UseOrderAction.SIGN_PURPOSE, "正当"), "省厅郑");
+        // 放成果落笔时件的状态是「已核准」：挪阶更新的状态箍须认核准，不能只认在办，
+        // 否则真库更新 0 行、整笔回滚，成果放不出去
+        UseOrderSignResult r = service.sign(act(id, UseOrderAction.ISSUE), "窗口周");
+        assertEquals(UseOrderFlow.STATUS_DONE, r.getOrder().getStatus().intValue());
+        assertEquals(UseOrderStage.DONE.name(), r.getOrder().getStage());
+    }
 
     @Test
     void 页面只开眼下阶且两处计数对得上() {

@@ -1,6 +1,7 @@
 package com.fc.v2.common.catalog;
 
 import com.fc.v2.common.qual.QualProdType;
+import com.fc.v2.model.auto.TMgisCatalogBook;
 import com.fc.v2.model.auto.TMgisCatalogLine;
 import com.fc.v2.model.custom.CatalogAcceptRequest;
 
@@ -128,6 +129,32 @@ public final class CatalogBookJudge {
             }
         }
         return new CatalogTally(total, accepted, pending, entries, sheetTotal);
+    }
+
+    /**
+     * 册子落账五数与行目当场重算的五数对一遍：汇总账（册子头）与拆项账
+     * （行目）两本账须同出一个源头。落账那一刻两本是齐的，往后行目被人
+     * 动过、或册子上的死数被人改过，翻账时这一道就断，册页摆不出来——
+     * 不许把两本各说各话的账摆上桌。
+     */
+    public static void requireBookMatches(TMgisCatalogBook book, List<TMgisCatalogLine> lines) {
+        if (book == null) {
+            throw new CatalogAcceptException("册子未指：两本账没法对");
+        }
+        CatalogTally recomputed = tally(lines);
+        compare("表上总行数", book.getTotalRows(), recomputed.getTotalRows());
+        compare("进账行数", book.getAcceptedRows(), recomputed.getAcceptedRows());
+        compare("挂账行数", book.getPendingRows(), recomputed.getPendingRows());
+        compare("进账条目数", book.getEntryCount(), recomputed.getEntryCount());
+        compare("进账幅数合计", book.getSheetTotal(), recomputed.getSheetTotal());
+    }
+
+    private static void compare(String name, Integer stored, int actual) {
+        if (stored == null || stored.intValue() != actual) {
+            throw new CatalogAcceptException("目录册两本账对不上：" + name + "册子上存着 "
+                    + (stored == null ? "空" : stored) + "，行目当场数出 " + actual
+                    + "——汇总账与拆项账须共一个源头，库里这一册被人动过");
+        }
     }
 
     /** 推演结果口径的三数（与 {@link #tally} 同一算法，落账前用） */

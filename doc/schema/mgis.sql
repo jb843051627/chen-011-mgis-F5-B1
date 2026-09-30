@@ -172,6 +172,23 @@ CREATE TABLE IF NOT EXISTS t_mgis_use_bill (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='成果提供使用逐级核准单';
 
+-- 旧核准单票籍：签批/打回/退回每一笔落账；打回销档不删行（建表另见 sql/mgis_use_bill_sign.sql）
+CREATE TABLE IF NOT EXISTS t_mgis_use_bill_sign (
+  id bigint NOT NULL COMMENT '主键',
+  bill_id bigint NOT NULL COMMENT '核准单主键',
+  node_no int NOT NULL COMMENT '落笔时所在层 0..1(签批层)',
+  batch_no int NOT NULL DEFAULT 1 COMMENT '第几趟到这一层(打回后再上来一趟加一)',
+  action varchar(16) NOT NULL COMMENT '票种 APPROVE签批 REJECT打回 ROLLBACK退回',
+  signer varchar(64) NOT NULL COMMENT '签署经办(自登录态写死,不许代报)',
+  `comment` varchar(500) DEFAULT NULL COMMENT '签批意见/打回或退回缘由',
+  active int NOT NULL DEFAULT 1 COMMENT '还算不算数 1算数 0随打回销档(票仍在链上)',
+  create_by varchar(64) DEFAULT NULL,
+  create_time datetime DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_use_bill_sign_point (bill_id, node_no, batch_no, signer, action),
+  KEY idx_use_bill_sign_bill (bill_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='成果提供使用逐级核准单票籍(只立;打回销档不删行)';
+
 -- 用密成果领用申请（五表，建表脚本另见 sql/mgis_use_order.sql；旧 t_mgis_use_bill 脚手架封存不动）
 CREATE TABLE IF NOT EXISTS t_mgis_use_order (
   id bigint NOT NULL COMMENT '主键',

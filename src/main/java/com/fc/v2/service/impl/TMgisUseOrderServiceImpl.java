@@ -290,12 +290,17 @@ public class TMgisUseOrderServiceImpl implements ITMgisUseOrderService {
         UseOrderTally.requireProvinceCount(storedProvinceCount(order), chain, currentRound(order));
 
         Map<String, List<TMgisUseEntry>> page = UseOrderFlow.pageOf(chain, currentRound(order));
-        boolean writable = order.getStatus() != null && order.getStatus() == UseOrderFlow.STATUS_OPEN;
+        // 开口子与签署门同一口径：在办件开眼下阶；已核准件停在放成果阶，
+        // 这一阶还得开着（只收放成果一笔）；否决、办结一律不开
+        boolean openable = order.getStatus() != null
+                && (order.getStatus() == UseOrderFlow.STATUS_OPEN
+                || order.getStatus() == UseOrderFlow.STATUS_APPROVED);
         List<UseOrderPageView.StagePage> stages = new ArrayList<UseOrderPageView.StagePage>();
         for (UseOrderStage st : new UseOrderStage[]{UseOrderStage.WINDOW, UseOrderStage.CITY,
                 UseOrderStage.PROVINCE, UseOrderStage.ISSUE}) {
-            // 件停在哪一阶，页面就只开哪一阶的口子；否决、核准、办结都不再开口子
-            boolean open = writable && st.name().equals(order.getStage());
+            // 件停在哪一阶，页面就只开哪一阶的口子；核准后只留放成果阶，
+            // 否决、办结都不再开口子
+            boolean open = openable && st.name().equals(order.getStage());
             List<TMgisUseEntry> entries = page.get(st.name());
             stages.add(new UseOrderPageView.StagePage(st.name(), st.getLabel(), open,
                     entries == null ? Collections.<TMgisUseEntry>emptyList() : entries));
@@ -344,11 +349,15 @@ public class TMgisUseOrderServiceImpl implements ITMgisUseOrderService {
 
         UpdateWrapper<TMgisUseOrder> uw = new UpdateWrapper<TMgisUseOrder>();
         // 挪阶带旧阶旧轮次在比作比：被人抢先挪过即顶回，隔着阶的动作不生效；
-        // 只在在办件上挪，否决、核准（放成果除外）、办结都挪不动
+        // 状态这道箍按动作认：在办件上落核验、两签、发回、否决；放成果只在
+        // 已核准件上落——签署门（checkWritable）、挪阶这道更新、页面开门三处
+        // 一口径，不能两扇门各奉其主
+        int expectStatus = action == UseOrderAction.ISSUE
+                ? UseOrderFlow.STATUS_APPROVED : UseOrderFlow.STATUS_OPEN;
         uw.eq("id", order.getId())
                 .eq("stage", order.getStage())
                 .eq("round_no", round)
-                .eq("status", UseOrderFlow.STATUS_OPEN)
+                .eq("status", expectStatus)
                 .set("stage", next.name())
                 .set("round_no", newRound);
         if (action.isProvinceSign()) {

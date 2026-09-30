@@ -119,13 +119,18 @@ public class TMgisCatalogBookServiceImpl implements ITMgisCatalogBookService {
 
     private CatalogBookView toView(TMgisCatalogBook book) {
         List<TMgisCatalogLine> lines = listLines(book.getId());
-        // 三数不当册子上的死数回，自行目经同一处口径当场重算
+        // 三数不当册子上的死数回，自行目经同一处口径当场重算；重算之外还得跟
+        // 册子头那份落账数对一遍——汇总账与拆项账两本不相谋就是库里被人动过
+        CatalogBookJudge.requireBookMatches(book, lines);
         return new CatalogBookView(book, lines, CatalogBookJudge.tally(lines));
     }
 
     /** 库里的行目重新推演成回话定局：重递回的头一遍，与当日接口回话一字一板 */
     private CatalogVerdict rebuildVerdict(TMgisCatalogBook book) {
         List<TMgisCatalogLine> entities = listLines(book.getId());
+        // 头一遍能回，册子头与行目两本账先得是齐的；被人动过不许把头一遍的
+        // 空名头递出去搪塞
+        CatalogBookJudge.requireBookMatches(book, entities);
         List<CatalogLineOutcome> outcomes = new ArrayList<CatalogLineOutcome>(entities.size());
         for (TMgisCatalogLine e : entities) {
             outcomes.add(new CatalogLineOutcome(e.getRowNo(), e.getSheetCode(), e.getProdType(), e.getRegion(),

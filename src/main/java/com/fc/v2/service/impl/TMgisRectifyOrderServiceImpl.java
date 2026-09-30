@@ -80,7 +80,9 @@ public class TMgisRectifyOrderServiceImpl implements ITMgisRectifyOrderService {
         if (operator == null || operator.trim().isEmpty()) {
             throw new IllegalArgumentException("经办未认");
         }
-        TMgisRectifyOrder order = this.mgisRectifyOrderMapper.selectById(req.getOrderId());
+        // 同一件的承办在库里以行锁串行（事务内 SELECT … FOR UPDATE），
+        // 复测两名同一分钟并发也一笔不丢、序号不乱，与用密申请签署门同一口径
+        TMgisRectifyOrder order = this.mgisRectifyOrderMapper.selectForUpdate(req.getOrderId());
         RectifyAction action = RectifyAction.require(req.getAction());
         // 封存、挂号笔，先顶回
         RectifyFlow.checkWritable(order, action);
@@ -247,10 +249,13 @@ public class TMgisRectifyOrderServiceImpl implements ITMgisRectifyOrderService {
         int newRound = order.getRoundNo() + (RectifyFlow.isSendBack(action) ? 1 : 0);
 
         UpdateWrapper<TMgisRectifyOrder> uw = new UpdateWrapper<TMgisRectifyOrder>();
-        // 挪站带旧站旧轮次作比：被人抢先挪过即顶回，隔着站的动作不生效
+        // 挪站带旧站旧轮次作比：被人抢先挪过即顶回，隔着站的动作不生效；
+        // 只在在途单上挪（封存那一笔落笔前单子仍是在途），封存后一枚都挪不动。
+        // 与用密申请的签署门同一口径：门面核状态、条件更新再箍一道，两处俱到
         uw.eq("id", order.getId())
                 .eq("station", order.getStation())
                 .eq("round_no", order.getRoundNo())
+                .eq("status", RectifyFlow.STATUS_OPEN)
                 .set("station", next.name())
                 .set("round_no", newRound);
         if (action == RectifyAction.NOTIFY) {

@@ -1,6 +1,7 @@
 package com.fc.v2.rectify;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fc.v2.common.rectify.RectifyAction;
 import com.fc.v2.common.rectify.RectifyChainJudge;
 import com.fc.v2.common.rectify.RectifyChainReport;
@@ -88,11 +89,58 @@ class TMgisRectifyOrderServiceImplTest {
             }
             return null;
         });
+        // 行锁取单在假库里与按主键取同一份（真库里另加 FOR UPDATE 串行同单承办）
+        when(orderMapper.selectForUpdate(any())).thenAnswer(inv -> {
+            Long id = inv.getArgument(0);
+            for (TMgisRectifyOrder o : orders) {
+                if (o.getId().equals(id)) {
+                    return o;
+                }
+            }
+            return null;
+        });
         when(orderMapper.insert(any())).thenAnswer(inv -> {
             orders.add(inv.getArgument(0));
             return 1;
         });
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        // 条件更新照真库的 WHERE 匹配：id/station/round_no/status 四样对得上才动一行
+        when(orderMapper.update(isNull(), any())).thenAnswer(inv -> {
+            UpdateWrapper<TMgisRectifyOrder> uw = inv.getArgument(1);
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(?i)(id|station|round_no|status)\\s*=\\s*#\\{ew\\.paramNameValuePairs\\.(\\w+)}")
+                    .matcher(uw.getSqlSegment());
+            Long whereId = null;
+            String whereStation = null;
+            Integer whereRound = null;
+            Integer whereStatus = null;
+            while (m.find()) {
+                Object v = uw.getParamNameValuePairs().get(m.group(2));
+                switch (m.group(1).toLowerCase()) {
+                    case "id":
+                        whereId = ((Number) v).longValue();
+                        break;
+                    case "station":
+                        whereStation = String.valueOf(v);
+                        break;
+                    case "round_no":
+                        whereRound = ((Number) v).intValue();
+                        break;
+                    default:
+                        whereStatus = ((Number) v).intValue();
+                        break;
+                }
+            }
+            for (TMgisRectifyOrder o : orders) {
+                if (!o.getId().equals(whereId)) {
+                    continue;
+                }
+                boolean hit = (whereStation == null || whereStation.equals(o.getStation()))
+                        && (whereRound == null || whereRound.equals(o.getRoundNo()))
+                        && (whereStatus == null || whereStatus.equals(o.getStatus()));
+                return hit ? 1 : 0;
+            }
+            return 0;
+        });
         when(orderMapper.selectCount(any())).thenReturn(0);
 
         when(entryMapper.selectList(any())).thenAnswer(inv -> {
