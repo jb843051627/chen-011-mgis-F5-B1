@@ -28,8 +28,8 @@
 | 一键生成领用清单，窗口不誊第二遍 | `POST /mgisUseOrder/claimList`：图幅代号、密级、出图年份自申请行带，批准文号、申请单位自核准那一份带，一个字段不经手；一件对一条清单，重按只回头一遍（duplicated） | `TMgisUseOrderServiceImpl.claimList`、`uk_use_claim_order` |
 | 一家单位一册图对一条清单 | 清单与核准件 1:1（唯一键兜底）；一幅图一行，清单行数与核准件图幅行数恒等，两边对不上即库里被人动过 | `t_mgis_use_claim`、`UseOrderTally` |
 | 从末阶一级级捋得回去 | 每笔记前一笔哈希（头一笔认 64 个 0），哈希押进阶、动作、写的话、经办、时辰、轮次；顺拉自受理念到放成果逐笔重算，倒拉自末笔沿前哈希念回受理，步数须与总笔数相合 | `UseOrderChainJudge.verifyForward/verifyBackward` |
-| 捋出来的与当日屏上同一个模样、同一序 | 逐阶页面只显最新一轮算数的笔，按落笔先后排；表式就用申请单那四阶（受理/核验/省厅/放成果），不另起炉灶 | `UseOrderFlow.pageOf`、`UseOrderPageView` |
-| 旧签名照封，扩本事添重载 | 早年 `t_mgis_use_bill` 脚手架（approve/reject/rollback）原样封存不动；新流程走全新五表，旧方法签名一个不改 | `ITMgisUseBillService`（封存）、`sql/mgis_use_order.sql` |
+| 捋出来的与当日屏上同一个模样、同一序 | 逐阶页面只显最新一轮算数的笔，按落笔先后排；表式就用申请单那四阶（受理/核验/省厅/放成果），不另起炉灶；省厅阶另把还欠哪一岗（`awaitingActions`）点名，换岗接班照此落笔，不必先试一笔挨顶回 | `UseOrderFlow.pageOf`、`UseOrderFlow.provinceAwaiting`、`UseOrderPageView` |
+| 旧签名照封，扩本事添重载 | 早年 `t_mgis_use_bill` 脚手架 approve/reject/rollback 三个签名一个不改；暗病在原处填平：否决落账（件置「已打回」、缘由连同否决票）、票数逐票落签署明细 `t_mgis_use_bill_sign`（哪位签过查得到）、联名档须两名不同的人、同人第二票不认、退回销旧票清零、同件行锁串行。新流程仍走全新五表 | `ITMgisUseBillService`（封存签名+新添 `listSigns`）、`sql/mgis_use_bill_sign.sql`、`sql/mgis_use_order.sql` |
 
 ## 门脸规矩
 
@@ -118,4 +118,6 @@
 无 add/edit/remove 端点；改栏、撤件一律另起新申请。
 
 建表脚本：`sql/mgis_use_order.sql`（申请单、申请图幅行、签署落笔链、
-领用清单、清单行五表）。早年脚手架 `t_mgis_use_bill` 与本流程无涉，原样封存。
+领用清单、清单行五表）。早年脚手架 `t_mgis_use_bill` 不另走新门，暗病在
+原处填平（否决落账、逐票落账、联名两人、退回销籍、行锁串行），签署明细
+见 `sql/mgis_use_bill_sign.sql`；旧 approve/reject/rollback 签名不动。

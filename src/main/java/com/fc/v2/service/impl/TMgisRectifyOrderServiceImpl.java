@@ -80,7 +80,7 @@ public class TMgisRectifyOrderServiceImpl implements ITMgisRectifyOrderService {
         if (operator == null || operator.trim().isEmpty()) {
             throw new IllegalArgumentException("经办未认");
         }
-        TMgisRectifyOrder order = this.mgisRectifyOrderMapper.selectById(req.getOrderId());
+        TMgisRectifyOrder order = this.mgisRectifyOrderMapper.selectForUpdate(req.getOrderId());
         RectifyAction action = RectifyAction.require(req.getAction());
         // 封存、挂号笔，先顶回
         RectifyFlow.checkWritable(order, action);
@@ -209,17 +209,47 @@ public class TMgisRectifyOrderServiceImpl implements ITMgisRectifyOrderService {
     @Override
     public RectifyPageView pageView(Long orderId) {
         TMgisRectifyOrder order = requireOrder(orderId);
-        Map<String, List<TMgisRectifyEntry>> page = RectifyFlow.pageOf(listChain(order.getId()));
+        List<TMgisRectifyEntry> chain = listChain(order.getId());
+        Map<String, List<TMgisRectifyEntry>> page = RectifyFlow.pageOf(chain);
+        // 归集件数两处账：单子上存的与归集件表当场数的对不上，即库里被人动过
+        requireItemCount(order);
         boolean sealed = order.getStatus() != null && order.getStatus() == RectifyFlow.STATUS_SEALED;
+        int round = currentRound(order);
         List<RectifyPageView.StationPage> stations = new ArrayList<RectifyPageView.StationPage>();
         for (RectifyStation st : RectifyStation.values()) {
             // 单子停在哪一站，页面就只开哪一站的口子
             boolean open = !sealed && st.name().equals(order.getStation());
             List<TMgisRectifyEntry> entries = page.get(st.name());
+            // 复测站把还欠哪一名点明白：接班的人照此落，不必先试一笔挨顶回
+            List<String> awaiting;
+            if (open && st == RectifyStation.RETEST) {
+                awaiting = new ArrayList<String>();
+                for (RectifyAction a : RectifyFlow.retestAwaiting(chain, round)) {
+                    awaiting.add(a.name());
+                }
+            } else {
+                awaiting = Collections.<String>emptyList();
+            }
             stations.add(new RectifyPageView.StationPage(st.name(), st.getLabel(), open,
-                    entries == null ? Collections.<TMgisRectifyEntry>emptyList() : entries));
+                    entries == null ? Collections.<TMgisRectifyEntry>emptyList() : entries, awaiting));
         }
         return new RectifyPageView(order, order.getStation(), sealed, stations);
+    }
+
+    /** 归集件数两处须同一个数：单子上存的与归集件表当场数的对不上即顶回 */
+    private void requireItemCount(TMgisRectifyOrder order) {
+        Integer stored = order.getItemCount();
+        int actual = this.mgisRectifyItemMapper.selectCount(new QueryWrapper<TMgisRectifyItem>()
+                .eq("order_id", order.getId()));
+        int kept = stored == null ? 0 : stored;
+        if (kept != actual) {
+            throw new RectifyFlowException("归集件数两处口径对不上：回执单存着 " + kept
+                    + " 件，归集件表里当场数出 " + actual + " 件——库里这张单被人动过");
+        }
+    }
+
+    private static int currentRound(TMgisRectifyOrder order) {
+        return order.getRoundNo() == null ? 1 : order.getRoundNo();
     }
 
     @Override
@@ -247,10 +277,12 @@ public class TMgisRectifyOrderServiceImpl implements ITMgisRectifyOrderService {
         int newRound = order.getRoundNo() + (RectifyFlow.isSendBack(action) ? 1 : 0);
 
         UpdateWrapper<TMgisRectifyOrder> uw = new UpdateWrapper<TMgisRectifyOrder>();
-        // 挪站带旧站旧轮次作比：被人抢先挪过即顶回，隔着站的动作不生效
+        // 挪站带旧站旧轮次作比：被人抢先挪过即顶回，隔着站的动作不生效；
+        // 只在在途单上挪，封存那一笔落下后再有人落笔也挪不动
         uw.eq("id", order.getId())
                 .eq("station", order.getStation())
                 .eq("round_no", order.getRoundNo())
+                .eq("status", RectifyFlow.STATUS_OPEN)
                 .set("station", next.name())
                 .set("round_no", newRound);
         if (action == RectifyAction.NOTIFY) {

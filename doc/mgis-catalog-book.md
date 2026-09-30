@@ -18,7 +18,7 @@
 | 行数超过上限，整册不收，一行也不落 | 越过 `MAX_ROWS`(2000) 整册顶回，册子与行目一笔不 insert | `CatalogBookJudge.judge` → `CatalogAcceptException` |
 | 一张白纸不许回「已核讫」 | 零行（或行目为空）整册顶回，不存在册子、不发回执；册号、属地抬头缺失同办 | `CatalogBookJudge.judge` |
 | 翻账两头都要翻得动 | 凭册号、凭属地都能把行目拉出来；挂着几行、进账几行、表上几行当场对（挂着加入账 = 总行数） | `GET /mgisCatalog/byBookNo`、`/byRegion`、`CatalogBookJudge.tally` |
-| 回执与库同出一处算 | 接口回话即推演定局；翻账三数不当册子上的死数，自行目经同一个 `tally` 当场重算；少一笔多一笔追得到具体哪一行 | `CatalogBookJudge.tally`、`TMgisCatalogBookServiceImpl.toView` |
+| 回执与库同出一处算 | 接口回话即推演定局；翻账三数不当册子上的死数，自行目经同一个 `tally` 当场重算，重算数与册子落账时存的五数（总/进账/挂账/条目/幅数）逐项对一遍，对不上即顶回，不当糊涂账摆上桌；少一笔多一笔追得到具体哪一行 | `CatalogBookJudge.tally`、`TMgisCatalogBookServiceImpl.toView/requireSameTally` |
 | 行次对不上原表整册不收 | 填报行次须为正且册内不撞号；未填的由系统按原表次序补空号。撞号则挂账缘故指不到具体行，整册不收 | `CatalogBookJudge.assignRowNos` |
 | 成果类别沿用质检同一套 | 类别取 `qual` 的四档（地形图/影像图/矢量要素/地名注记），代号或中文名皆认；不识照留原值挂账，不擅自归类 | `QualProdType.tryOf` |
 

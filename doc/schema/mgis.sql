@@ -172,6 +172,21 @@ CREATE TABLE IF NOT EXISTS t_mgis_use_bill (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='成果提供使用逐级核准单';
 
+-- 逐级核准单签署明细（旧单补账：每节点每票落账、同人同节点只认一票、
+-- 两名点齐须两名不同的人、退回销籍；建表脚本另见 sql/mgis_use_bill_sign.sql）
+CREATE TABLE IF NOT EXISTS t_mgis_use_bill_sign (
+  id bigint NOT NULL COMMENT '主键',
+  bill_id bigint NOT NULL COMMENT '核准单主键',
+  node_no int NOT NULL COMMENT '签在哪一层',
+  approver varchar(64) NULL COMMENT '签批人',
+  verdict int NOT NULL COMMENT '这一票 1同意 2否决',
+  comment_text varchar(500) NULL COMMENT '签批意见/否决缘由',
+  sign_at datetime NOT NULL COMMENT '签批时辰',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_use_bill_sign_point (bill_id, node_no, approver, verdict),
+  KEY idx_use_bill_sign_bill (bill_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='成果提供使用逐级核准单签署明细';
+
 -- 用密成果领用申请（五表，建表脚本另见 sql/mgis_use_order.sql；旧 t_mgis_use_bill 脚手架封存不动）
 CREATE TABLE IF NOT EXISTS t_mgis_use_order (
   id bigint NOT NULL COMMENT '主键',

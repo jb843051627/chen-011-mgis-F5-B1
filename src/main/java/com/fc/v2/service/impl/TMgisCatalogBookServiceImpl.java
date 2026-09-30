@@ -119,8 +119,32 @@ public class TMgisCatalogBookServiceImpl implements ITMgisCatalogBookService {
 
     private CatalogBookView toView(TMgisCatalogBook book) {
         List<TMgisCatalogLine> lines = listLines(book.getId());
-        // 三数不当册子上的死数回，自行目经同一处口径当场重算
-        return new CatalogBookView(book, lines, CatalogBookJudge.tally(lines));
+        // 三数不当册子上的死数回，自行目经同一处口径当场重算；
+        // 重算出来与册子落账时存的那份对不上，即库里被人动过，这一账不许摆上桌
+        CatalogTally recomputed = CatalogBookJudge.tally(lines);
+        requireSameTally(book, recomputed);
+        return new CatalogBookView(book, lines, recomputed);
+    }
+
+    /** 册子存的五数（汇总账）与行目当场重算的五数（拆项账）须同出一个源头 */
+    private static void requireSameTally(TMgisCatalogBook book, CatalogTally t) {
+        if (eq(book.getTotalRows(), t.getTotalRows())
+                && eq(book.getAcceptedRows(), t.getAcceptedRows())
+                && eq(book.getPendingRows(), t.getPendingRows())
+                && eq(book.getEntryCount(), t.getEntryCount())
+                && eq(book.getSheetTotal(), t.getSheetTotal())) {
+            return;
+        }
+        throw new CatalogAcceptException("册号「" + book.getBookNo() + "」汇总数与拆项账对不上：册子存着 "
+                + book.getTotalRows() + "/" + book.getAcceptedRows() + "/" + book.getPendingRows()
+                + "/" + book.getEntryCount() + "/" + book.getSheetTotal()
+                + "（总/进账/挂账/条目/幅数），行目当场数出 "
+                + t.getTotalRows() + "/" + t.getAcceptedRows() + "/" + t.getPendingRows()
+                + "/" + t.getEntryCount() + "/" + t.getSheetTotal() + "——库里这一册被人动过");
+    }
+
+    private static boolean eq(Integer stored, int actual) {
+        return stored != null && stored == actual;
     }
 
     /** 库里的行目重新推演成回话定局：重递回的头一遍，与当日接口回话一字一板 */

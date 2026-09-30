@@ -312,6 +312,32 @@ public final class UseOrderFlow {
         return n;
     }
 
+    /**
+     * 省厅阶这一轮还欠哪一岗的签。换岗接班的人翻件，照这一句就知道该谁落、
+     * 还差几笔，不必亲手点一下挨顶回才算得明白。两岗齐了、或件已不在省厅
+     * 在办阶，返回空单。
+     */
+    public static List<UseOrderAction> provinceAwaiting(List<TMgisUseEntry> entries, int roundNo) {
+        List<UseOrderAction> waiting = new ArrayList<UseOrderAction>();
+        if (entries == null) {
+            return waiting;
+        }
+        for (UseOrderAction a : new UseOrderAction[]{UseOrderAction.SIGN_SECRECY, UseOrderAction.SIGN_PURPOSE}) {
+            boolean in = false;
+            for (TMgisUseEntry e : entries) {
+                if (UseOrderStage.PROVINCE.name().equals(e.getStage()) && roundOf(e) == roundNo
+                        && a.name().equals(e.getAction())) {
+                    in = true;
+                    break;
+                }
+            }
+            if (!in) {
+                waiting.add(a);
+            }
+        }
+        return waiting;
+    }
+
     /** 状态成文 */
     public static String statusLabel(Integer status) {
         if (status != null) {

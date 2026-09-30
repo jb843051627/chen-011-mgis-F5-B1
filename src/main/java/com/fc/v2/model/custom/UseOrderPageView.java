@@ -94,11 +94,20 @@ public class UseOrderPageView implements Serializable {
         @ApiModelProperty(value = "这一阶算数的落笔")
         private final List<TMgisUseEntry> entries;
 
-        public StagePage(String stage, String label, boolean open, List<TMgisUseEntry> entries) {
+        /**
+         * 这一阶还欠的笔（动作代号）。省厅阶逐岗点名：哪一岗已签、还欠哪一岗，
+         * 换岗接班的人照此落笔，不必先点一笔挨顶回才试得明白；不欠为空表。
+         */
+        @ApiModelProperty(value = "这一阶还欠的笔(动作代号)")
+        private final List<String> awaitingActions;
+
+        public StagePage(String stage, String label, boolean open, List<TMgisUseEntry> entries,
+                         List<String> awaitingActions) {
             this.stage = stage;
             this.label = label;
             this.open = open;
             this.entries = entries;
+            this.awaitingActions = awaitingActions;
         }
 
         public String getStage() {
@@ -115,6 +124,10 @@ public class UseOrderPageView implements Serializable {
 
         public List<TMgisUseEntry> getEntries() {
             return entries;
+        }
+
+        public List<String> getAwaitingActions() {
+            return awaitingActions;
         }
     }
 }

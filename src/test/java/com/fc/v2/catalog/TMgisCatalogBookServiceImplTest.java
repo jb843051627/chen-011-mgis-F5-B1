@@ -359,6 +359,18 @@ class TMgisCatalogBookServiceImplTest {
     }
 
     @Test
+    void 册子汇总数被人改得与行目对不上翻账顶回() {
+        service.accept(book("ML-400", "临川市",
+                line(1, "A1", "地形图", "临川", "10"),
+                line(2, "A2", "影像图", "临川", "20")));
+        // 库里有人改了册子抬头的汇总数，行目没动：两本账不相谋
+        books.get(0).setSheetTotal(999);
+        CatalogAcceptException e = assertThrows(CatalogAcceptException.class,
+                () -> service.viewByBookNo("ML-400"));
+        assertTrue(e.getMessage().contains("汇总数与拆项账对不上"));
+    }
+
+    @Test
     void 凭属地翻账只出本市册子() {
         service.accept(book("ML-C1", "临川市", line(1, "A1", "地形图", "临川", "1")));
         service.accept(book("ML-C2", "清溪市", line(1, "B1", "地形图", "清溪", "2")));

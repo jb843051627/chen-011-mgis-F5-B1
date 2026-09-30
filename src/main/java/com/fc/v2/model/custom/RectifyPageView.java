@@ -83,11 +83,20 @@ public class RectifyPageView implements Serializable {
         @ApiModelProperty(value = "这一站算数的落笔")
         private final List<TMgisRectifyEntry> entries;
 
-        public StationPage(String station, String label, boolean open, List<TMgisRectifyEntry> entries) {
+        /**
+         * 这一站还欠的笔（动作代号）。复测站逐名点：检验机构、属地市局哪一名
+         * 已进、还欠哪一名，换岗接班照此落笔，不必先递一笔挨顶回；不欠为空表。
+         */
+        @ApiModelProperty(value = "这一站还欠的笔(动作代号)")
+        private final List<String> awaitingActions;
+
+        public StationPage(String station, String label, boolean open, List<TMgisRectifyEntry> entries,
+                           List<String> awaitingActions) {
             this.station = station;
             this.label = label;
             this.open = open;
             this.entries = entries;
+            this.awaitingActions = awaitingActions;
         }
 
         public String getStation() {
@@ -104,6 +113,10 @@ public class RectifyPageView implements Serializable {
 
         public List<TMgisRectifyEntry> getEntries() {
             return entries;
+        }
+
+        public List<String> getAwaitingActions() {
+            return awaitingActions;
         }
     }
 }

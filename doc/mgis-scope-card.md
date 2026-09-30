@@ -20,7 +20,7 @@
 | 注销档案不收新卡；老卡照旧查得到，但不能从老卡上接着添东西 | 档案 `status=1`：立卡顶回；老卡的核对、定档、类别增减一样顶回；查询、卡页面照常 | `ScopeCardJudge.checkDocWritable` |
 | 卡上只许挂到末级；大类与末级混挂、挂已并走的旧类别都不给落 | 类别目录一棵树（`t_mgis_scope_category`，一级大类、二级末级）：清单里有大类整单顶回并指到是哪个代号；`merged_into` 非空的旧类别顶回并写明并到哪 | `ScopeCardJudge.validateCategories` |
 | 层级档不许人手填，系统拿挂用类别数撞三道顶线折算，留两位小数 | 请求里带不带这一栏系统都不认，只认 `ScopeGradeJudge.gradeOf` 一处折算；落库 `grade_level` 两位小数 | `ScopeGradeJudge` |
-| 类别有增减、单位改了属地，这一档就得跟着重新折算 | 立卡、类别增减、定档三道手续各折一次落库；档案顶线、属地变了走 `recalcGradesOfSite` 整批重折；卡页面当场再重折一遍与落库档并列，对不上照实亮出来——只在立卡那天折一次是远远不够的 | `doAdjust`、`doProceed`、`recalcGradesOfSite`、`cardView` |
+| 类别有增减、单位改了属地，这一档就得跟着重新折算 | 立卡、类别增减、定档三道手续各折一次落库；档案顶线、属地变了走 `recalcGradesOfSite` 整批重折（注销档案名下老卡一张不折，老卡只准查不准再动），卡档变动同时在经手人链以「系统重折」记一笔，卡与链两头合盘；卡页面当场再重折一遍与落库档并列，对不上照实亮出来——只在立卡那天折一次是远远不够的 | `doAdjust`、`doProceed`、`recalcGradesOfSite`、`cardView` |
 | 创建人按下立卡那一下是谁就是谁，重录不许挪 | `create_by` 立卡时由服务层写死（经办自登录态取）；更新路径一律不碰这一栏；同一单号重递并一条，头一张原样回，创建人不动 | `doRegister` |
 | 经手人每过一道手续记一条，两个位置不许互相顶 | 经手人落笔链 `t_mgis_scope_card_entry` 只增不改（无 update/del_flag 列，服务层无改删入口）；经手人、落笔时辰在落笔那一下系统写死；链与 `create_by` 各记各的 | `TMgisScopeCardServiceImpl.pen` |
 | 省局从新增类别最多的单位往下排 | 省局口径按卡上单位编号归堆，本年度新增合计降序（同额按编号字典序排稳） | `ScopeCardTally.tally` → `provinceRows` |

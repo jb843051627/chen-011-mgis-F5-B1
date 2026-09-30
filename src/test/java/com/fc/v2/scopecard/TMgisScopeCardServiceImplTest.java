@@ -660,6 +660,30 @@ class TMgisScopeCardServiceImplTest {
         assertEquals(new BigDecimal("3.00"), cards.get(0).getGradeLevel());
         assertEquals(new BigDecimal("1.25"), cards.get(1).getGradeLevel());
         assertEquals(new BigDecimal("2.78"), cards.get(2).getGradeLevel());
+        // 联动两头合盘：卡档动了，经手人链上也留了重折那一笔（两张重折各一条）
+        int recalcPens = 0;
+        for (TMgisScopeCardEntry e : entries) {
+            if (e.getProc().equals(ScopeCardProcedure.GRADE.name())
+                    && e.getPennedBy().equals("系统重折")) {
+                recalcPens++;
+            }
+        }
+        assertEquals(2, recalcPens);
+    }
+
+    @Test
+    void 档案注销后整批重折不许再拧老卡() {
+        service.register(registerReq("LW-025", "单位自报", "ZW01", "SEG-W", "10", null, "GC01"), "张三");
+        BigDecimal before = cards.get(0).getGradeLevel();
+        int entriesBefore = entries.size();
+        // 档案注销
+        docs.get(2).setStatus(1);
+        ScopeCardAcceptException e = assertThrows(ScopeCardAcceptException.class,
+                () -> service.recalcGradesOfSite("ZW01"));
+        assertEquals(ScopeCardRejectReason.SITE_DOC_CANCELLED.getCode(), e.getReasonCode());
+        // 老卡的档一笔没动，经手人链也没多一条
+        assertEquals(before, cards.get(0).getGradeLevel());
+        assertEquals(entriesBefore, entries.size());
     }
 
     @Test

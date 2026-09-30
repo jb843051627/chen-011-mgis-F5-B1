@@ -107,7 +107,21 @@ class TMgisUseOrderServiceImplTest {
             orders.add(inv.getArgument(0));
             return 1;
         });
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        // 条件更新照 WHERE 落到匹配的件上：旧阶旧轮旧状态对不上即 0 行，
+        // 真库怎么顶，假库就怎么顶（放成果那一笔只收在「已核准」件上）
+        when(orderMapper.update(isNull(), any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<?> uw = inv.getArgument(1);
+            java.util.Map<String, Object> where = parseConds(uw.getSqlSegment(), uw.getParamNameValuePairs());
+            java.util.Map<String, Object> sets = parseConds(uw.getSqlSet(), uw.getParamNameValuePairs());
+            int n = 0;
+            for (TMgisUseOrder o : orders) {
+                if (matchesConds(o, where)) {
+                    sets.forEach((col, v) -> setColumn(o, col, v));
+                    n++;
+                }
+            }
+            return n;
+        });
 
         when(entryMapper.selectList(any())).thenAnswer(inv -> {
             QueryWrapper<?> qw = inv.getArgument(0);
@@ -529,9 +543,113 @@ class TMgisUseOrderServiceImplTest {
         assertThrows(UseOrderFlowException.class, () -> service.claimList(999L, "窗口周"));
     }
 
+    @Test
+    void 页面点名省厅还欠哪一岗换岗接班不必先试一笔() {
+        TMgisUseOrder order = acceptOne();
+        Long id = order.getId();
+        cityPass(id, "市局吴");
+
+        // 一枚没签：省厅阶欠两岗
+        UseOrderPageView v0 = service.pageView(id);
+        assertEquals(java.util.Arrays.asList("SIGN_SECRECY", "SIGN_PURPOSE"), awaitingOf(v0, "PROVINCE"));
+
+        service.sign(opinion(id, UseOrderAction.SIGN_SECRECY, "到位"), "省厅王");
+        // 只签一枚：还欠用途岗，接班人照此落笔
+        UseOrderPageView v1 = service.pageView(id);
+        assertEquals(java.util.Collections.singletonList("SIGN_PURPOSE"), awaitingOf(v1, "PROVINCE"));
+
+        service.sign(opinion(id, UseOrderAction.SIGN_PURPOSE, "正当"), "省厅郑");
+        // 两签齐核准：省厅阶不再开口子，也不再欠笔
+        UseOrderPageView v2 = service.pageView(id);
+        assertTrue(awaitingOf(v2, "PROVINCE").isEmpty());
+    }
+
+    private static List<String> awaitingOf(UseOrderPageView view, String stage) {
+        for (UseOrderPageView.StagePage sp : view.getStages()) {
+            if (stage.equals(sp.getStage())) {
+                return sp.getAwaitingActions();
+            }
+        }
+        throw new AssertionError("没有这一阶：" + stage);
+    }
+
+    @Test
+    void 已核准件放成果条件更新收的是已核准脸色() {
+        TMgisUseOrder order = acceptOne();
+        Long id = order.getId();
+        cityPass(id, "市局吴");
+        service.sign(opinion(id, UseOrderAction.SIGN_SECRECY, "到位"), "省厅王");
+        service.sign(opinion(id, UseOrderAction.SIGN_PURPOSE, "正当"), "省厅郑");
+        // 两签齐：件已是「已核准」脸色、停在放成果阶
+        assertEquals(UseOrderFlow.STATUS_APPROVED, order.getStatus().intValue());
+        // 放成果那一笔只收在已核准件上：认条件的假库下走得通，办结落定
+        UseOrderSignResult r = service.sign(act(id, UseOrderAction.ISSUE), "窗口周");
+        assertEquals(UseOrderFlow.STATUS_DONE, r.getOrder().getStatus().intValue());
+    }
+
     private static UseOrderSignRequest opinion(Long id, UseOrderAction action, String opinion) {
         UseOrderSignRequest r = act(id, action);
         r.setOpinion(opinion);
         return r;
+    }
+
+    // ---------- 条件更新假库帮手 ----------
+
+    private static final java.util.regex.Pattern COND =
+            java.util.regex.Pattern.compile("(\\w+)\\s*=\\s*#\\{ew\\.paramNameValuePairs\\.(\\w+)\\}");
+
+    /** 把 WHERE 段或 SET 段归置成 列 → 值 */
+    private static java.util.Map<String, Object> parseConds(String sql, java.util.Map<String, Object> params) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<String, Object>();
+        if (sql == null) {
+            return out;
+        }
+        java.util.regex.Matcher m = COND.matcher(sql);
+        while (m.find()) {
+            out.put(m.group(1), params.get(m.group(2)));
+        }
+        return out;
+    }
+
+    private static boolean matchesConds(TMgisUseOrder o, java.util.Map<String, Object> conds) {
+        for (java.util.Map.Entry<String, Object> e : conds.entrySet()) {
+            Object got = columnOf(o, e.getKey());
+            Object want = e.getValue();
+            if (want == null ? got != null : !want.equals(got)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Object columnOf(Object row, String column) {
+        try {
+            StringBuilder name = new StringBuilder("get");
+            for (String part : column.split("_")) {
+                name.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+            return row.getClass().getMethod(name.toString()).invoke(row);
+        } catch (Exception ex) {
+            throw new IllegalStateException("取列失败：" + column, ex);
+        }
+    }
+
+    private static void setColumn(Object row, String column, Object value) {
+        try {
+            StringBuilder name = new StringBuilder("set");
+            for (String part : column.split("_")) {
+                name.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+            for (java.lang.reflect.Method mth : row.getClass().getMethods()) {
+                if (mth.getName().equals(name.toString()) && mth.getParameterTypes().length == 1
+                        && value != null && mth.getParameterTypes()[0].isInstance(value)) {
+                    mth.invoke(row, value);
+                    return;
+                }
+            }
+            throw new IllegalStateException("没有写入法子：" + column);
+        } catch (Exception ex) {
+            throw new IllegalStateException("写列失败：" + column, ex);
+        }
     }
 }

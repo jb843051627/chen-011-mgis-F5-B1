@@ -15,15 +15,16 @@
 | 门面只留「承办」一扇 | 告知/整改/复测/退回/销号/封存全打 `POST /mgisRectify/undertake` 进；一站站地挪、退回一站，章程都在服务层 | `MgisRectifyController.undertake` → `TMgisRectifyOrderServiceImpl.undertake` |
 | 承办到没到底，页面不许先落一笔；生效与否只认接口回话 | 经办自登录态取、落笔时辰由服务层写死，请求里说了不算；回话里是落了的那一笔与单子眼下的站，页面只按回话刷新 | `MgisRectifyController.undertake`、`TMgisRectifyOrderServiceImpl.undertake` |
 | 只许一站接一站 | 单子停在哪一站就只开哪一站的口子；隔着站落笔当场顶回，不生效 | `RectifyFlow.checkStation` |
-| 同一点第二回来的只认头一笔 | 同站同动作同轮已有落笔：不再落笔，头一笔原样回给它（哪怕单子已挪站）；唯一键 `(order_id, station, action, round_no)` 兜底并发 | `TMgisRectifyOrderServiceImpl.undertake`、`uk_rectify_entry_point` |
+| 同一点第二回来的只认头一笔 | 同站同动作同轮已有落笔：不再落笔，头一笔原样回给它（哪怕单子已挪站）；同一件的承办在库里以行锁串行（`selectForUpdate`，事务内 `SELECT … FOR UPDATE`），两名同一分钟并发也一笔不丢、序号不乱；唯一键 `(order_id, station, action, round_no)` 再兜底 | `TMgisRectifyOrderServiceImpl.undertake`、`TMgisRectifyOrderMapper.selectForUpdate`、`uk_rectify_entry_point` |
 | 经办、时辰落笔那一下系统写死 | `penned_by`/`penned_at` 由服务层在落笔时写（时辰以秒计，与库面 DATETIME 同口径）；落笔链表不设 update/del_flag 列，服务层无改删入口——事后由不得人回头补录，也不许挪时辰 | `t_mgis_rectify_entry` |
 | 告知三样落笔即定 | 问题图幅、抽样口径、复测凭证，三样缺一样落不了笔；落笔同时快照进单（`notify_*`），往后的站只读取不重填 | `RectifyFlow.packPayload`、`TMgisRectifyOrderServiceImpl.moveStation` |
 | 整改站想改抽样口径，当场顶回 | 整改那一笔夹带三样中任何一样，直接顶回，一笔都不写 | `RectifyFlow.packPayload` |
 | 改出来的说法不许盖掉先前落笔那一笔 | 落笔链只增不改；退回重办由新一笔指向被顶替的那一笔（`supersedes_entry_id`），旧笔不删不改 | `t_mgis_rectify_entry` |
 | 复测认两个人 | 检验机构（RETEST_AGENCY）、属地市局（RETEST_CITY）两名的复核意见都要进单；只回来一名，单子仍停在复测 | `RectifyFlow.stationAfter` |
 | 复测看出合不上，把整改退回重办 | 退回只许从复测退回整改（SEND_BACK），轮次加一；退回缘由必填 | `RectifyFlow.stationAfter`、`RectifyFlow.isSendBack` |
-| 重办前那一站原先写的话退出页面 | 页面每一站只显最新一轮落笔的话，链上两代人的笔都还在——不并排挂着，来检查的人不用问哪一份算数 | `RectifyFlow.pageOf` |
-| 销号往下即封存 | 封存落笔后单子状态置封存、在途标记置 NULL；封了存的单子不再挂新条目，也不许把哪一站整条摘除（无改删端点）；要重查另行立单，从挂号重新走满六站，两张各算各的 | `RectifyFlow.checkWritable`、`TMgisRectifyOrderServiceImpl.moveStation` |
+| 重办前那一站原先写的话退出页面 | 页面每一站只显最新一轮落笔的话，链上两代人的笔都还在——不并排挂着，来检查的人不用问哪一份算数；复测站另把还欠哪一名（`awaitingActions`）点名，换岗接班照此落笔，不必先递一笔挨顶回 | `RectifyFlow.pageOf`、`RectifyFlow.retestAwaiting`、`RectifyPageView` |
+| 归集件数两本账须同一个数 | 回执单头存的 `item_count`（汇总）与归集件表 `t_mgis_rectify_item` 当场数出的件数（拆项）对不上，页面即摆不出来——库里这张单被人动过 | `TMgisRectifyOrderServiceImpl.pageView` |
+| 销号往下即封存 | 封存落笔后单子状态置封存、在途标记置 NULL；挪站条件更新带 `status=在途` 作比，封存那一笔落定后再有人落笔也挪不动；封了存的单子不再挂新条目，也不许把哪一站整条摘除（无改删端点）；要重查另行立单，从挂号重新走满六站，两张各算各的 | `RectifyFlow.checkWritable`、`TMgisRectifyOrderServiceImpl.moveStation` |
 | 顺拉倒拉验链 | 每笔记前一笔哈希（头一笔认 64 个 0），哈希押进站、动作、写的话、经办、时辰；顺拉自挂号念到封存，逐笔重算、逐笔对接，须与当日逐站页面上留下的内容一字不差；倒拉自封存沿前哈希念回挂号，步数须与总笔数相合。少一笔、次序错一处、时辰倒挂、内容被改动，这批整改即不合格 | `RectifyChainJudge.verifyForward` / `verifyBackward` |
 | 旧签名照原样封存，添新功能请新起重载 | 已发布的方法签名一律不动；结论表加批号走的是加列加字段，`issue(QualIssueRequest)` 签名原样 | `ITMgisRectifyOrderService` javadoc、`TMgisQualConclusion.batchNo` |
 

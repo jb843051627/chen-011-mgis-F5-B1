@@ -297,8 +297,18 @@ public class TMgisUseOrderServiceImpl implements ITMgisUseOrderService {
             // 件停在哪一阶，页面就只开哪一阶的口子；否决、核准、办结都不再开口子
             boolean open = writable && st.name().equals(order.getStage());
             List<TMgisUseEntry> entries = page.get(st.name());
+            // 省厅阶把还欠哪一奇点明白：接班的人照此落，不必先试一笔挨顶回
+            List<String> awaiting;
+            if (open && st == UseOrderStage.PROVINCE) {
+                awaiting = new ArrayList<String>();
+                for (UseOrderAction a : UseOrderFlow.provinceAwaiting(chain, currentRound(order))) {
+                    awaiting.add(a.name());
+                }
+            } else {
+                awaiting = Collections.<String>emptyList();
+            }
             stages.add(new UseOrderPageView.StagePage(st.name(), st.getLabel(), open,
-                    entries == null ? Collections.<TMgisUseEntry>emptyList() : entries));
+                    entries == null ? Collections.<TMgisUseEntry>emptyList() : entries, awaiting));
         }
         return new UseOrderPageView(order, sheets, order.getStage(),
                 UseOrderFlow.statusLabel(order.getStatus()), stages);
@@ -343,12 +353,15 @@ public class TMgisUseOrderServiceImpl implements ITMgisUseOrderService {
         String approveNo = action.isProvinceSign() && provinceBothIn ? newApproveNo(IdWorker.getId()) : null;
 
         UpdateWrapper<TMgisUseOrder> uw = new UpdateWrapper<TMgisUseOrder>();
-        // 挪阶带旧阶旧轮次在比作比：被人抢先挪过即顶回，隔着阶的动作不生效；
-        // 只在在办件上挪，否决、核准（放成果除外）、办结都挪不动
+        // 挪阶带旧阶旧轮次在比作比：被人抢先挪过即顶回，隔着阶的动作不生效。
+        // 在办件上只收在办的笔；唯独放成果那一笔收在已核准件上——两签齐核准后
+        // 件已是「已核准」脸色，这一笔把它挪到办结，不能再拿「在办」的章程卡它。
+        int writableStatus = action == UseOrderAction.ISSUE
+                ? UseOrderFlow.STATUS_APPROVED : UseOrderFlow.STATUS_OPEN;
         uw.eq("id", order.getId())
                 .eq("stage", order.getStage())
                 .eq("round_no", round)
-                .eq("status", UseOrderFlow.STATUS_OPEN)
+                .eq("status", writableStatus)
                 .set("stage", next.name())
                 .set("round_no", newRound);
         if (action.isProvinceSign()) {

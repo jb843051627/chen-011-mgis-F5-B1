@@ -182,6 +182,31 @@ public final class RectifyFlow {
     }
 
     /**
+     * 复测站这一轮还欠哪一名的复核意见。检验机构、属地市局两名齐了这一站
+     * 才算走通；换岗接班的人照这一句就知道还差谁，不必先递一笔挨顶回。
+     */
+    public static List<RectifyAction> retestAwaiting(List<TMgisRectifyEntry> entries, int roundNo) {
+        List<RectifyAction> waiting = new ArrayList<RectifyAction>();
+        if (entries == null) {
+            return waiting;
+        }
+        for (RectifyAction a : new RectifyAction[]{RectifyAction.RETEST_AGENCY, RectifyAction.RETEST_CITY}) {
+            boolean in = false;
+            for (TMgisRectifyEntry e : entries) {
+                if (RectifyStation.RETEST.name().equals(e.getStation()) && roundOf(e) == roundNo
+                        && a.name().equals(e.getAction())) {
+                    in = true;
+                    break;
+                }
+            }
+            if (!in) {
+                waiting.add(a);
+            }
+        }
+        return waiting;
+    }
+
+    /**
      * 链上前后两笔的走站次序合不合法：
      * 同轮只许原地补复测的另一名，或往下一站挪；
      * 跨轮只许「退回重办 → 整改重办」这一种。

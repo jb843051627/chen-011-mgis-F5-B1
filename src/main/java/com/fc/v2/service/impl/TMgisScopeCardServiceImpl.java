@@ -415,6 +415,8 @@ public class TMgisScopeCardServiceImpl extends ServiceImpl<TMgisScopeCardMapper,
     /**
      * 档案顶线、属地变了，名下各卡层级档跟着重新折算落库。
      * 挂用类别数越过新顶线的卡不重折（留原档待人处置），返回重折笔数。
+     * 注销档案名下的老卡一张都不许动——注销后老卡只准查、不准再添改；
+     * 重折落档同时在经手人链上记一笔，卡上的档动了、链上没话，两头账合不到一盘。
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -428,6 +430,8 @@ public class TMgisScopeCardServiceImpl extends ServiceImpl<TMgisScopeCardMapper,
             throw new ScopeCardAcceptException(ScopeCardRejectReason.SITE_DOC_NOT_FOUND,
                     ScopeCardRejectReason.SITE_DOC_NOT_FOUND.getLabel() + "（填报原值：" + no + "）");
         }
+        // 注销档案：老卡照旧查得到，但这道联动不许再拧老卡的环节
+        ScopeCardJudge.checkDocWritable(siteDoc);
         // 顶线未维护齐没法折算，整批不动
         ScopeGradeJudge.requireCeilings(siteDoc.getTh1Max(), siteDoc.getTh2Max(), siteDoc.getTh3Max());
         List<TMgisScopeCard> cards = this.baseMapper.selectList(new QueryWrapper<TMgisScopeCard>()
@@ -442,14 +446,28 @@ public class TMgisScopeCardServiceImpl extends ServiceImpl<TMgisScopeCardMapper,
                 // 越过新顶线的卡留原档待人处置，不拦整批
                 continue;
             }
+            if (card.getGradeLevel() != null && grade.compareTo(card.getGradeLevel()) == 0) {
+                // 档没变不动账，更不留空话
+                continue;
+            }
             this.baseMapper.update(null, new UpdateWrapper<TMgisScopeCard>()
                     .eq("id", card.getId()).eq("del_flag", 0)
                     .set("grade_level", grade)
+                    .set("update_by", RECALC_OPERATOR)
                     .set("update_time", new Date()));
+            card.setGradeLevel(grade);
+            // 联动的另一头：经手人链上记清是档案顶线变了重折，新档几何——
+            // 只改卡上的档不留言，换岗来查问不出这一档是谁折的、为何动
+            pen(card.getId(), ScopeCardProcedure.GRADE,
+                    "档案顶线变更，系统整批重折层级档：" + card.getQty().toPlainString()
+                            + " 项 → " + grade.toPlainString() + appendRemark(null), RECALC_OPERATOR);
             folded++;
         }
         return folded;
     }
+
+    /** 档案联动重折的经办署名（系统落笔，非自然人，与零点归集同例） */
+    private static final String RECALC_OPERATOR = "系统重折";
 
     // ---------------- 翻账与落笔（私有） ----------------
 

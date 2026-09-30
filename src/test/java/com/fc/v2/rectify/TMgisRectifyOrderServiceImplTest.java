@@ -88,12 +88,49 @@ class TMgisRectifyOrderServiceImplTest {
             }
             return null;
         });
+        // 行锁取件在假库里与按主键取同一份（真库里另加 FOR UPDATE 串行同单承办）
+        when(orderMapper.selectForUpdate(any())).thenAnswer(inv -> {
+            Long id = inv.getArgument(0);
+            for (TMgisRectifyOrder o : orders) {
+                if (o.getId().equals(id)) {
+                    return o;
+                }
+            }
+            return null;
+        });
         when(orderMapper.insert(any())).thenAnswer(inv -> {
             orders.add(inv.getArgument(0));
             return 1;
         });
-        when(orderMapper.update(isNull(), any())).thenReturn(1);
+        // 条件更新照 WHERE 落到匹配的单上：旧站旧轮旧状态对不上即 0 行，
+        // 真库怎么顶，假库就怎么顶（封存后、并发先挪的单都挪不动）
+        when(orderMapper.update(isNull(), any())).thenAnswer(inv -> {
+            com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<?> uw = inv.getArgument(1);
+            java.util.Map<String, Object> where = parseConds(uw.getSqlSegment(), uw.getParamNameValuePairs());
+            java.util.Map<String, Object> sets = parseConds(uw.getSqlSet(), uw.getParamNameValuePairs());
+            int n = 0;
+            for (TMgisRectifyOrder o : orders) {
+                if (matchesConds(o, where)) {
+                    sets.forEach((col, v) -> setColumn(o, col, v));
+                    n++;
+                }
+            }
+            return n;
+        });
         when(orderMapper.selectCount(any())).thenReturn(0);
+        // 归集件数当场按单从归集件表数，供页面两处口径对账
+        when(itemMapper.selectCount(any())).thenAnswer(inv -> {
+            QueryWrapper<?> qw = inv.getArgument(0);
+            qw.getSqlSegment();
+            Object orderId = qw.getParamNameValuePairs().values().iterator().next();
+            int n = 0;
+            for (TMgisRectifyItem it : items) {
+                if (it.getOrderId().equals(((Number) orderId).longValue())) {
+                    n++;
+                }
+            }
+            return n;
+        });
 
         when(entryMapper.selectList(any())).thenAnswer(inv -> {
             QueryWrapper<?> qw = inv.getArgument(0);
@@ -442,5 +479,106 @@ class TMgisRectifyOrderServiceImplTest {
         assertThrows(RectifyFlowException.class, () -> service.undertake(notifyReq(999L), "张三"));
         assertThrows(RectifyFlowException.class, () -> service.pageView(999L));
         assertThrows(RectifyFlowException.class, () -> service.verifyChain(999L));
+    }
+
+    @Test
+    void 页面点名复测还欠哪一名换岗接班不必先试一笔() {
+        TMgisRectifyOrder order = raiseOne();
+        Long id = order.getId();
+        service.undertake(notifyReq(id), "张三");
+        service.undertake(rectifyReq(id, "已整改"), "李四");
+
+        // 两名都没进：复测站欠两名
+        RectifyPageView v0 = service.pageView(id);
+        assertEquals(java.util.Arrays.asList("RETEST_AGENCY", "RETEST_CITY"), awaitingOf(v0, "RETEST"));
+
+        service.undertake(retestReq(id, RectifyAction.RETEST_AGENCY, "合格"), "王五");
+        // 只回检验机构一名：还欠属地市局
+        RectifyPageView v1 = service.pageView(id);
+        assertEquals(java.util.Collections.singletonList("RETEST_CITY"), awaitingOf(v1, "RETEST"));
+
+        service.undertake(retestReq(id, RectifyAction.RETEST_CITY, "同意"), "赵六");
+        // 两名齐、件挪到销号：复测站不再开口子、不欠名
+        RectifyPageView v2 = service.pageView(id);
+        assertTrue(awaitingOf(v2, "RETEST").isEmpty());
+    }
+
+    private static List<String> awaitingOf(RectifyPageView view, String station) {
+        for (RectifyPageView.StationPage sp : view.getStations()) {
+            if (station.equals(sp.getStation())) {
+                return sp.getAwaitingActions();
+            }
+        }
+        throw new AssertionError("没有这一站：" + station);
+    }
+
+    @Test
+    void 归集件数汇总与拆项对不上页面摆不出来() {
+        TMgisRectifyOrder order = raiseOne();
+        // 库里有人改了单头件数：单头 9 件，归集件表只 1 件
+        order.setItemCount(9);
+        RectifyFlowException e = assertThrows(RectifyFlowException.class,
+                () -> service.pageView(order.getId()));
+        assertTrue(e.getMessage().contains("两处口径对不上"));
+    }
+
+    // ---------- 条件更新假库帮手 ----------
+
+    private static final java.util.regex.Pattern COND =
+            java.util.regex.Pattern.compile("(\\w+)\\s*=\\s*#\\{ew\\.paramNameValuePairs\\.(\\w+)\\}");
+
+    /** 把 WHERE 段或 SET 段归置成 列 → 值 */
+    private static java.util.Map<String, Object> parseConds(String sql, java.util.Map<String, Object> params) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<String, Object>();
+        if (sql == null) {
+            return out;
+        }
+        java.util.regex.Matcher m = COND.matcher(sql);
+        while (m.find()) {
+            out.put(m.group(1), params.get(m.group(2)));
+        }
+        return out;
+    }
+
+    private static boolean matchesConds(TMgisRectifyOrder o, java.util.Map<String, Object> conds) {
+        for (java.util.Map.Entry<String, Object> e : conds.entrySet()) {
+            Object got = columnOf(o, e.getKey());
+            Object want = e.getValue();
+            if (want == null ? got != null : !want.equals(got)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Object columnOf(Object row, String column) {
+        try {
+            StringBuilder name = new StringBuilder("get");
+            for (String part : column.split("_")) {
+                name.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+            return row.getClass().getMethod(name.toString()).invoke(row);
+        } catch (Exception ex) {
+            throw new IllegalStateException("取列失败：" + column, ex);
+        }
+    }
+
+    private static void setColumn(Object row, String column, Object value) {
+        try {
+            StringBuilder name = new StringBuilder("set");
+            for (String part : column.split("_")) {
+                name.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+            }
+            for (java.lang.reflect.Method mth : row.getClass().getMethods()) {
+                if (mth.getName().equals(name.toString()) && mth.getParameterTypes().length == 1
+                        && (value == null || mth.getParameterTypes()[0].isInstance(value))) {
+                    mth.invoke(row, value);
+                    return;
+                }
+            }
+            throw new IllegalStateException("没有写入法子：" + column);
+        } catch (Exception ex) {
+            throw new IllegalStateException("写列失败：" + column, ex);
+        }
     }
 }
